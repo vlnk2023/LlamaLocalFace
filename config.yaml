@@ -1,0 +1,30 @@
+# llama-server.exe 的路径
+llama_server_path: "llamacpp/llama-server.exe"
+
+# 全局默认参数 (所有模型通用)
+default_args:
+  - "-c"        # 上下文长度
+  - "32768"     # 32k 上下文 (平衡性能和功能)
+  - "-ngl"      # GPU 加速层数
+  - "0"         # 0 = 纯CPU模式 (根据你的参考配置)
+  - "--host"
+  - "127.0.0.1" # 内部进程也只监听本地，不暴露
+  - "--temp"    # 温度参数，影响输出随机性
+  - "0.72"
+  - "--top-p"   # Top-p 采样
+  - "0.95"
+default_model: ministral-3
+# 你的模型列表
+models:
+  # 1. MiroThinker 8B Q6
+  mirothinker:
+    path: "model/MiroThinker-v1.0-8B.Q6_K.gguf"
+ 
+
+  # 2. Ministral 8B Q4 (最快的模型)
+  ministral-abliterated:
+    path: "model/ministral-8B-Instruct-Q4_K_M.gguf"
+    args:
+      - "-c" 
+      - "131072" # Ministral 支持128k长文本
+ 

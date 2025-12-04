@@ -1,0 +1,1448 @@
+<!DOCTYPE html>
+<html lang="zh" class="h-full">
+
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Llama-Swap</title>
+    <!-- Tailwind CSS (CDN) -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    
+    <!-- Marked.js (CDN) -->
+    <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+    
+    <!-- Highlight.js (CDN) -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+    
+    <!-- DOMPurify (CDN) -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/dompurify/3.0.8/purify.min.js"></script>
+    
+    <!-- Highlight.js CSS (CDN) -->
+    <link id="highlight-style" rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github.min.css">
+    
+    <script>
+        tailwind.config = {
+            darkMode: 'class',
+            theme: {
+                extend: {
+                    colors: {
+                        claude: '#6354F5',
+                    },
+                },
+            },
+        }
+    </script>
+    <style>
+        /* Claude-style message bubbles */
+        .bubble-user {
+            border-radius: 16px 16px 2px 16px;
+        }
+
+        .bubble-claude {
+            border-radius: 16px 16px 16px 2px;
+        }
+
+        /* Typing animation */
+        @keyframes bounce {
+            0%, 100% { transform: translateY(0); }
+            50% { transform: translateY(-6px); }
+        }
+
+        .typing-indicator span {
+            animation: bounce 1.2s infinite;
+        }
+        .typing-indicator span:nth-child(2) { animation-delay: 0.15s; }
+        .typing-indicator span:nth-child(3) { animation-delay: 0.3s; }
+
+        /* Settings panel slide-in animation */
+        .settings-panel {
+            transform: translateX(100%);
+            transition: transform 0.3s ease-in-out;
+        }
+        .settings-open .settings-panel {
+            transform: translateX(0);
+        }
+
+        /* Mobile Sidebar transitions */
+        .sidebar-transition {
+            transition: transform 0.3s ease-in-out;
+        }
+
+        /* Export button hover effect */
+        .export-btn:hover {
+            background-color: rgba(91, 91, 214, 0.1);
+        }
+
+        /* Claude 官方按钮 hover 背景色 */
+        .hover\:bg-button-ghost-hover:hover {
+            background-color: rgb(243 244 246 / 1); /* light */
+        }
+        .dark .hover\:bg-button-ghost-hover:hover {
+            background-color: rgb(255 255 255 / 0.08);
+        }
+
+        /* 清除所有可能影响按钮的默认样式 */
+        #sidebar-toggle {
+            margin: 0 !important;
+            padding: 0 !important;
+            position: relative !important;
+        }
+
+        /* Code block styling */
+        .message-text pre {
+            background: #f6f6f6;
+            border-radius: 6px;
+            padding: 1rem;
+            overflow-x: auto;
+            margin: 0.75rem 0;
+            font-size: 0.875rem;
+            border: 1px solid #e5e5e5;
+        }
+
+        /* Dark mode code block adjustments */
+        .dark .message-text pre {
+            background: #0d1117; /* GitHub Dark background */
+            border-color: #30363d;
+        }
+
+        .message-text code {
+            font-family: 'SF Mono', Monaco, Consolas, monospace;
+        }
+
+        .message-text ul, .message-text ol {
+            margin-left: 1.5rem;
+            margin: 0.75rem 0;
+        }
+        .message-text p { margin: 0.75rem 0; }
+        .message-text p:first-child { margin-top: 0; }
+        .message-text p:last-child { margin-bottom: 0; }
+
+        /* Overlay for mobile sidebar */
+        #mobile-overlay {
+            transition: opacity 0.3s ease-in-out;
+        }
+
+        /* History Item Styling */
+        .history-item {
+            position: relative;
+            padding: 0.75rem 1rem;
+            cursor: pointer;
+            border-radius: 0.5rem;
+            transition: background-color 0.2s;
+        }
+        .history-item:hover {
+            background-color: rgba(0,0,0,0.05);
+        }
+        .dark .history-item:hover {
+            background-color: rgba(255,255,255,0.05);
+        }
+        .history-item.active {
+            background-color: rgba(0,0,0,0.1);
+        }
+        .dark .history-item.active {
+            background-color: rgba(255,255,255,0.1);
+        }
+        .delete-chat-btn {
+            display: none;
+        }
+        .history-item:hover .delete-chat-btn {
+            display: block;
+        }
+        
+        /* Image Preview Area */
+        #image-preview-area {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 0.5rem;
+            padding: 0 1rem;
+            margin-bottom: 0.5rem;
+        }
+        .img-preview-card {
+            position: relative;
+            width: 64px;
+            height: 64px;
+            border-radius: 8px;
+            overflow: hidden;
+            border: 1px solid #e5e5e5;
+        }
+        .img-preview-card img {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+        }
+        .img-preview-remove {
+            position: absolute;
+            top: 2px;
+            right: 2px;
+            background: rgba(0,0,0,0.5);
+            color: white;
+            border-radius: 50%;
+            width: 16px;
+            height: 16px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 10px;
+            cursor: pointer;
+        }
+        .img-preview-remove:hover {
+            background: rgba(0,0,0,0.8);
+        }
+
+        /* Input area layout adjustment */
+        .input-wrapper {
+            transition: all 0.2s;
+        }
+
+        /* Message Actions Toolbar - FIXED VISIBILITY */
+        .message-actions {
+            opacity: 1; /* 始终显示，防止用户找不到 */
+            transition: opacity 0.2s ease-in-out;
+        }
+        .action-btn {
+            padding: 4px 8px;
+            border-radius: 4px;
+            color: #9ca3af; /* gray-400 */
+            transition: all 0.2s;
+            display: flex;
+            align-items: center;
+            gap: 4px;
+            font-size: 0.75rem;
+        }
+        .action-btn:hover {
+            color: #4b5563; /* gray-600 */
+            background-color: rgba(0,0,0,0.05);
+        }
+        .dark .action-btn:hover {
+            color: #d1d5db; /* gray-300 */
+            background-color: rgba(255,255,255,0.1);
+        }
+
+        /* Edit Mode Styles */
+        .edit-container textarea {
+            background: white;
+            color: black;
+            border: 1px solid #e5e5e5;
+            border-radius: 0.5rem;
+            padding: 0.5rem;
+            width: 100%;
+            font-size: 0.95rem;
+            resize: vertical;
+            min-height: 60px;
+        }
+        .dark .edit-container textarea {
+            background: #1f1f1f;
+            color: white;
+            border-color: #374151;
+        }
+        .edit-actions {
+            display: flex;
+            justify-content: flex-end;
+            gap: 0.5rem;
+            margin-top: 0.5rem;
+        }
+        .btn-sm {
+            padding: 0.25rem 0.75rem;
+            border-radius: 0.375rem;
+            font-size: 0.875rem;
+            font-weight: 500;
+            transition: background-color 0.2s;
+        }
+        .btn-cancel {
+            background-color: #e5e7eb;
+            color: #374151;
+        }
+        .btn-cancel:hover { background-color: #d1d5db; }
+        .dark .btn-cancel {
+            background-color: #374151;
+            color: #e5e7eb;
+        }
+        .dark .btn-cancel:hover { background-color: #4b5563; }
+        
+        .btn-save {
+            background-color: #6354F5;
+            color: white;
+        }
+        .btn-save:hover { background-color: #4f41c2; }
+    </style>
+</head>
+
+<body class="h-full bg-white dark:bg-black text-black dark:text-white flex overflow-hidden">
+
+    <!-- Mobile Overlay -->
+    <div id="mobile-overlay" class="fixed inset-0 bg-black/50 z-30 hidden opacity-0 lg:hidden"></div>
+
+    <!-- Sidebar (History Sessions) -->
+    <aside id="sidebar"
+        class="fixed lg:relative inset-y-0 left-0 z-40 w-64 border-r border-gray-200 dark:border-gray-800 bg-gray-50 dark:bg-[#111111] flex-shrink-0 transform -translate-x-full lg:translate-x-0 sidebar-transition flex flex-col">
+        <div class="p-4 flex-shrink-0">
+            <button id="new-chat-btn"
+                class="w-full h-12 flex items-center justify-center gap-2 bg-black dark:bg-white text-white dark:text-black rounded-3xl font-medium hover:opacity-90 transition">
+                <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4" />
+                </svg>
+                New chat
+            </button>
+        </div>
+        <div class="px-4 py-2 text-xs font-semibold text-gray-500 uppercase tracking-wider">
+            History
+        </div>
+        <div id="history-list" class="px-2 space-y-1 text-sm overflow-y-auto flex-1 pb-4">
+            <!-- History items will be dynamically added here -->
+        </div>
+    </aside>
+
+    <!-- Main Area -->
+    <div id="main-content" class="flex-1 flex flex-col h-full relative min-w-0 lg:ml-64 transition-all duration-300">
+
+        <!-- Header -->
+        <header id="header-padding" class="h-14 border-b border-gray-200 dark:border-gray-800 flex items-center bg-white dark:bg-black flex-shrink-0 relative transition-padding duration-300 pl-0"
+            style="padding: 0 !important;">
+
+            <!-- Sidebar Toggle -->
+            <div class="flex flex-row items-center absolute left-4 top-1/2 -translate-y-1/2 z-10 transition-all duration-300">
+                <button data-slot="button" id="sidebar-toggle"
+                    class="inline-flex items-center justify-center gap-2 whitespace-nowrap text-sm font-medium leading-[normal] cursor-pointer focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:opacity-60 disabled:cursor-not-allowed transition-colors duration-100 [&_svg]:shrink-0 select-none hover:bg-button-ghost-hover hover:text-fg-primary disabled:hover:bg-transparent border border-transparent rounded-full overflow-hidden h-10 w-10 p-2 text-fg-primary"
+                    type="button" aria-label="Toggle sidebar">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-align-justify" id="sidebar-toggle-icon">
+                        <path d="M3 12h18"></path>
+                        <path d="M3 18h18"></path>
+                        <path d="M3 6h18"></path>
+                    </svg>
+                </button>
+            </div>
+
+            <div class="flex-1 flex items-center justify-center">
+                <span class="text-sm font-medium text-gray-700 dark:text-gray-300">本地AI模型聊天区</span>
+            </div>
+
+            <!-- Export Button -->
+            <button id="export-btn" class="absolute right-14 p-2 rounded hover:bg-gray-100 dark:hover:bg-gray-800 text-gray-500 hover:text-claude" title="Export Chat">
+                <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                </svg>
+            </button>
+
+            <!-- Settings Button -->
+            <button id="settings-btn" class="absolute right-4 p-2 rounded hover:bg-gray-100 dark:hover:bg-gray-800 text-gray-500 hover:text-claude" title="Settings">
+                <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" />
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+                </svg>
+            </button>
+        </header>
+
+        <!-- Messages Area -->
+        <main id="chat-area" class="flex-1 overflow-y-auto px-4 py-8 max-w-3xl mx-auto w-full">
+            <div id="messages" class="space-y-8">
+                <!-- Messages injected here -->
+            </div>
+        </main>
+
+        <!-- Input Area -->
+        <div class="border-t border-gray-200 dark:border-gray-800 px-4 py-4 bg-white dark:bg-black flex-shrink-0 z-10">
+            <div class="max-w-3xl mx-auto">
+                <!-- Wrapper for Preview + Input -->
+                <div class="input-wrapper rounded-xl border border-gray-300 dark:border-gray-700 bg-white dark:bg-[#111111] focus-within:ring-2 focus-within:ring-claude focus-within:border-transparent transition-shadow">
+                    
+                    <!-- Image Preview Area -->
+                    <div id="image-preview-area" class="hidden pt-3"></div>
+
+                    <div class="relative flex items-end p-2">
+                        <!-- Attachment Button -->
+                        <button id="attach-btn" class="p-2 mr-1 text-gray-500 hover:text-claude hover:bg-gray-100 dark:hover:bg-gray-800 rounded-lg transition-colors" title="上传图片 (或直接粘贴)">
+                            <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-paperclip"><path d="m21.44 11.05-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"/></svg>
+                        </button>
+                        <input type="file" id="file-input" accept="image/*" class="hidden" multiple>
+
+                        <!-- Text Input -->
+                        <textarea id="message-input" rows="1" placeholder="输入消息... (支持 Ctrl+V 粘贴图片)"
+                            class="w-full resize-none bg-transparent border-0 focus:ring-0 p-2 text-base max-h-[200px]"
+                            style="min-height: 44px;"></textarea>
+                        
+                        <!-- Send Button -->
+                        <button id="send-btn"
+                            class="p-2 ml-1 rounded-lg bg-claude hover:bg-[#4a4ac4] text-white flex items-center justify-center transition opacity-30 disabled:opacity-30 disabled:cursor-not-allowed">
+                            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                                    d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8" />
+                            </svg>
+                        </button>
+
+                        <!-- Stop Button -->
+                        <button id="stop-btn"
+                            class="p-2 ml-1 rounded-full bg-red-500 hover:bg-red-600 text-white flex items-center justify-center transition hidden shadow-md" title="停止生成">
+                            <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="currentColor" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-square"><rect width="18" height="18" x="3" y="3" rx="2"/></svg>
+                        </button>
+                    </div>
+                </div>
+                
+                <div class="text-center text-xs text-gray-500 mt-2">
+                    AI can make mistakes. Consider checking important information.
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Settings Panel (不变) -->
+    <div id="settings-panel"
+        class="settings-panel fixed top-0 right-0 h-full w-80 bg-white dark:bg-black border-l border-gray-200 dark:border-gray-800 z-50 p-6 overflow-y-auto hidden shadow-2xl">
+        <div class="flex justify-between items-center mb-6">
+            <h3 class="text-lg font-medium">Settings</h3>
+            <button id="close-settings" class="p-1 rounded text-gray-500 hover:text-black dark:hover:text-white">
+                <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
+                </svg>
+            </button>
+        </div>
+        <div class="space-y-6">
+            <!-- Model Selection -->
+            <div>
+                <label class="block text-sm font-medium mb-2">Model</label>
+                <div class="flex gap-2">
+                    <select id="modelName"
+                        class="flex-1 p-2 border border-gray-300 dark:border-gray-700 rounded-md bg-white dark:bg-[#111111] text-black dark:text-white">
+                        <option value="mirothinker">MiroThinker 8B Q6</option>
+                        <option value="huihui-abliterated">Huihui MiroThinker Abliterated Q8</option>
+                        <option value="ministral-abliterated">Ministral 8B Abliterated Q4</option>
+                        <option value="ministral3-reasoning">Ministral 3 8B Reasoning Q6</option>
+                        <option value="orchestrator">Nvidia Orchestrator 8B Q8</option>
+                        <option value="qwen3-gemini-distill">Qwen3 8B Gemini Distill Q8</option>
+                        <option value="januscoder">JanusCoder 8B Q6</option>
+                        <option value="unknown-q8">Unknown Q8</option>
+                    </select>
+                    <button id="refresh-models" class="px-3 py-2 border border-gray-300 dark:border-gray-700 rounded-md hover:bg-gray-100 dark:hover:bg-gray-800" title="Fetch from API">
+                        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                        </svg>
+                    </button>
+                </div>
+            </div>
+
+            <!-- System Prompt -->
+            <div>
+                <label class="block text-sm font-medium mb-2">System Prompt</label>
+                <textarea id="system-prompt" rows="3" 
+                    class="w-full p-2 border border-gray-300 dark:border-gray-700 rounded-md bg-white dark:bg-[#111111] text-sm resize-none"
+                    placeholder="You are a helpful assistant..."></textarea>
+            </div>
+
+            <!-- API Key -->
+            <div>
+                <label class="block text-sm font-medium mb-2">API Key</label>
+                <input type="password" id="apiKey" placeholder="sk-..."
+                    class="w-full p-2 border border-gray-300 dark:border-gray-700 rounded-md bg-white dark:bg-[#111111]">
+            </div>
+
+            <!-- Parameters -->
+            <div>
+                <label class="block text-sm font-medium mb-2">Temperature <span id="temp-val">0.7</span></label>
+                <input type="range" id="temperature" min="0" max="2" step="0.1" value="0.7" class="w-full">
+            </div>
+            <div>
+                <label class="block text-sm font-medium mb-2">Max Tokens <span id="tokens-val">4096</span></label>
+                <input type="range" id="max-tokens" min="100" max="4096" step="100" value="4096" class="w-full">
+            </div>
+
+            <!-- Dark Mode Toggle -->
+            <div class="flex items-center gap-2 pt-2 border-t border-gray-200 dark:border-gray-800">
+                <input type="checkbox" id="dark-mode" class="rounded w-4 h-4">
+                <label for="dark-mode" class="text-sm font-medium">Dark mode</label>
+            </div>
+        </div>
+        <div class="mt-8 flex gap-3">
+            <button id="cancel-settings" class="flex-1 px-4 py-2 border rounded-lg hover:bg-gray-100 dark:hover:bg-gray-800">取消</button>
+            <button id="confirm-settings" class="flex-1 px-4 py-2 bg-claude text-white rounded-lg hover:bg-[#4e42c7]">保存</button>
+        </div>
+    </div>
+
+    <!-- Export Panel (不变) -->
+    <div id="export-panel" class="hidden fixed inset-0 bg-black/50 z-50 flex items-center justify-center">
+        <div class="bg-white dark:bg-[#111111] rounded-xl p-6 max-w-sm w-full mx-4 shadow-2xl">
+            <h3 class="text-lg font-medium mb-4">导出聊天记录</h3>
+            <div class="space-y-3 mb-6">
+                <label class="flex items-center gap-3 cursor-pointer"><input type="radio" name="export-format" value="md" checked class="text-claude"> Markdown (.md)</label>
+                <label class="flex items-center gap-3 cursor-pointer"><input type="radio" name="export-format" value="txt" class="text-claude"> 纯文本 (.txt)</label>
+            </div>
+            <div class="flex gap-3">
+                <button id="cancel-export" class="flex-1 px-4 py-2 border rounded-lg hover:bg-gray-100 dark:hover:bg-gray-800">取消</button>
+                <button id="do-export" class="flex-1 px-4 py-2 bg-claude text-white rounded-lg hover:bg-[#4a4ac4]">导出</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- JavaScript -->
+    <script>
+        // --- Libraries Setup ---
+        marked.setOptions({
+            highlight: function (code, lang) {
+                if (lang && hljs.getLanguage(lang)) {
+                    return hljs.highlight(code, { language: lang }).value;
+                }
+                return hljs.highlightAuto(code).value;
+            },
+            breaks: true,
+            gfm: true
+        });
+
+        // --- DOM Elements ---
+        const chatArea = document.getElementById('chat-area');
+        const messages = document.getElementById('messages');
+        const userInput = document.getElementById('message-input');
+        const sendBtn = document.getElementById('send-btn');
+        const stopBtn = document.getElementById('stop-btn');
+        const attachBtn = document.getElementById('attach-btn');
+        const fileInput = document.getElementById('file-input');
+        const imagePreviewArea = document.getElementById('image-preview-area');
+        
+        const modelInput = document.getElementById('modelName');
+        const apiKeyInput = document.getElementById('apiKey');
+        const systemPromptInput = document.getElementById('system-prompt');
+        const settingsBtn = document.getElementById('settings-btn');
+        const settingsPanel = document.getElementById('settings-panel');
+        const closeSettings = document.getElementById('close-settings');
+        const newChatBtn = document.getElementById('new-chat-btn');
+        const darkModeToggle = document.getElementById('dark-mode');
+        const exportBtn = document.getElementById('export-btn');
+        const exportPanel = document.getElementById('export-panel');
+        const cancelExport = document.getElementById('cancel-export');
+        const doExport = document.getElementById('do-export');
+        const temperatureInput = document.getElementById('temperature');
+        const maxTokensInput = document.getElementById('max-tokens');
+        const tempVal = document.getElementById('temp-val');
+        const tokensVal = document.getElementById('tokens-val');
+        const cancelSettings = document.getElementById('cancel-settings');
+        const confirmSettings = document.getElementById('confirm-settings');
+        const refreshModelsBtn = document.getElementById('refresh-models');
+        const sidebar = document.getElementById('sidebar');
+        const mobileOverlay = document.getElementById('mobile-overlay');
+        const highlightLink = document.getElementById('highlight-style');
+        const sidebarToggleBtn = document.getElementById('sidebar-toggle');
+        const sidebarToggleIcon = document.getElementById('sidebar-toggle-icon');
+        const mainContent = document.getElementById('main-content');
+        const historyList = document.getElementById('history-list');
+
+        // --- State ---
+        let history = [];
+        let attachedImages = []; // Array of base64 strings
+        let abortController = null;
+        let editingIndex = -1; // New: Track which message is being edited
+        const DEFAULT_SYSTEM_PROMPT = "You are a helpful AI assistant.";
+        const BASE_API_URL = "";  // 改成相对路径！因为现在是通过 proxy 访问的
+        
+        // History State
+        let chatSessions = JSON.parse(localStorage.getItem('chat_sessions') || '[]');
+        let currentSessionId = null;
+
+        // --- Initialization ---
+        
+        // Init settings
+        if (localStorage.getItem('apiKey')) apiKeyInput.value = localStorage.getItem('apiKey');
+        if (localStorage.getItem('model')) modelInput.value = localStorage.getItem('model');
+        systemPromptInput.value = localStorage.getItem('systemPrompt') || DEFAULT_SYSTEM_PROMPT;
+        if (localStorage.getItem('temperature')) {
+            temperatureInput.value = localStorage.getItem('temperature');
+            tempVal.textContent = localStorage.getItem('temperature');
+        }
+        if (localStorage.getItem('max_tokens')) {
+            maxTokensInput.value = localStorage.getItem('max_tokens');
+            tokensVal.textContent = localStorage.getItem('max_tokens');
+        }
+
+        // Init Dark Mode
+        function setDarkMode(isDark) {
+            if (isDark) {
+                document.documentElement.classList.add('dark');
+                highlightLink.href = 'https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css';
+                darkModeToggle.checked = true;
+            } else {
+                document.documentElement.classList.remove('dark');
+                highlightLink.href = 'https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github.min.css';
+                darkModeToggle.checked = false;
+            }
+        }
+        if (window.matchMedia('(prefers-color-scheme: dark)').matches) setDarkMode(true);
+        darkModeToggle.addEventListener('change', function () { setDarkMode(this.checked); });
+
+        // Load History List on Boot
+        renderHistoryList();
+        
+        // Load latest session or start new
+        if (chatSessions.length > 0) {
+            loadSession(chatSessions[0].id);
+        } else {
+            startNewSession();
+        }
+
+        // --- History Logic ---
+
+        function generateUUID() {
+            return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function(c) {
+                var r = Math.random() * 16 | 0, v = c == 'x' ? r : (r & 0x3 | 0x8);
+                return v.toString(16);
+            });
+        }
+
+        function startNewSession() {
+            currentSessionId = generateUUID();
+            history = [];
+            editingIndex = -1;
+            messages.innerHTML = '';
+            renderWelcomeMsg();
+            closeSidebar();
+        }
+
+        function saveCurrentSession() {
+            if (!currentSessionId) return;
+            
+            // Update or create
+            const existingIndex = chatSessions.findIndex(s => s.id === currentSessionId);
+            
+            // Generate title from first user message if possible
+            let title = 'New Chat';
+            const firstUserMsg = history.find(m => m.role === 'user');
+            if (firstUserMsg) {
+                if (typeof firstUserMsg.content === 'string') {
+                    title = firstUserMsg.content.slice(0, 30) + (firstUserMsg.content.length > 30 ? '...' : '');
+                } else if (Array.isArray(firstUserMsg.content)) {
+                    // Multimodal content
+                    const textPart = firstUserMsg.content.find(p => p.type === 'text');
+                    if (textPart) {
+                        title = textPart.text.slice(0, 30) + (textPart.text.length > 30 ? '...' : '');
+                    } else {
+                        title = "[Image]";
+                    }
+                }
+            }
+
+            const sessionData = {
+                id: currentSessionId,
+                title: title,
+                timestamp: Date.now(),
+                messages: history
+            };
+
+            if (existingIndex !== -1) {
+                chatSessions[existingIndex] = sessionData;
+            } else {
+                chatSessions.unshift(sessionData); // Add to top
+            }
+
+            // Sort by timestamp desc
+            chatSessions.sort((a, b) => b.timestamp - a.timestamp);
+
+            localStorage.setItem('chat_sessions', JSON.stringify(chatSessions));
+            renderHistoryList();
+        }
+
+        function loadSession(id) {
+            const session = chatSessions.find(s => s.id === id);
+            if (!session) return;
+
+            currentSessionId = id;
+            history = session.messages || [];
+            editingIndex = -1; // Reset edit state
+            
+            // Re-render chat using the robust render function
+            renderChatFromHistory();
+            
+            closeSidebar();
+            renderHistoryList(); // Update active state
+        }
+        
+        // New function to completely rebuild DOM from history state
+        function renderChatFromHistory() {
+            messages.innerHTML = '';
+            if (history.length === 0) {
+                renderWelcomeMsg();
+            } else {
+                history.forEach((msg, index) => {
+                    if (msg.role === 'user') {
+                        addMsg('user', msg.content, false, index);
+                    } else if (msg.role === 'assistant') {
+                        // Assistant messages are typically strings in history
+                        const textDiv = addMsg('assistant', '', true, index);
+                        let content = msg.content;
+                        if (typeof content !== 'string') content = JSON.stringify(content); // Fallback
+                        let rendered = marked.parse(content);
+                        if (window.DOMPurify) rendered = DOMPurify.sanitize(rendered);
+                        textDiv.innerHTML = rendered;
+                    }
+                });
+            }
+            chatArea.scrollTop = chatArea.scrollHeight;
+        }
+
+        function deleteSession(id, event) {
+            event.stopPropagation(); // Prevent loading the session
+            if (!confirm('Are you sure you want to delete this chat?')) return;
+
+            chatSessions = chatSessions.filter(s => s.id !== id);
+            localStorage.setItem('chat_sessions', JSON.stringify(chatSessions));
+            
+            if (currentSessionId === id) {
+                startNewSession();
+            } else {
+                renderHistoryList();
+            }
+        }
+
+        function renderHistoryList() {
+            historyList.innerHTML = '';
+            
+            chatSessions.forEach(session => {
+                const div = document.createElement('div');
+                div.className = `history-item group flex items-center justify-between text-gray-700 dark:text-gray-300 ${session.id === currentSessionId ? 'active' : ''}`;
+                div.onclick = () => loadSession(session.id);
+                
+                const titleSpan = document.createElement('span');
+                titleSpan.className = 'truncate flex-1 pr-2';
+                titleSpan.textContent = session.title || 'New Chat';
+                
+                const deleteBtn = document.createElement('button');
+                deleteBtn.className = 'delete-chat-btn text-gray-400 hover:text-red-500 p-1 rounded';
+                deleteBtn.innerHTML = '<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>';
+                deleteBtn.onclick = (e) => deleteSession(session.id, e);
+
+                div.appendChild(titleSpan);
+                div.appendChild(deleteBtn);
+                historyList.appendChild(div);
+            });
+        }
+
+        newChatBtn.addEventListener('click', () => {
+            // Save current before leaving? It's auto saved on send.
+            startNewSession();
+        });
+
+        // --- Image Handling Logic ---
+
+        // 1. Attach Button
+        attachBtn.addEventListener('click', () => {
+            fileInput.click();
+        });
+
+        // 2. File Selection
+        fileInput.addEventListener('change', (e) => {
+            handleFiles(e.target.files);
+            fileInput.value = ''; // Reset
+        });
+
+        // 3. Paste Event
+        userInput.addEventListener('paste', (e) => {
+            const items = (e.clipboardData || e.originalEvent.clipboardData).items;
+            const files = [];
+            for (let i = 0; i < items.length; i++) {
+                if (items[i].type.indexOf('image') !== -1) {
+                    const blob = items[i].getAsFile();
+                    files.push(blob);
+                }
+            }
+            if (files.length > 0) {
+                e.preventDefault(); // Stop pasting the file name text if any
+                handleFiles(files);
+            }
+        });
+
+        function handleFiles(files) {
+            if (!files || files.length === 0) return;
+            
+            Array.from(files).forEach(file => {
+                if (!file.type.startsWith('image/')) return;
+                
+                const reader = new FileReader();
+                reader.onload = (e) => {
+                    const base64 = e.target.result;
+                    addImageToPreview(base64);
+                };
+                reader.readAsDataURL(file);
+            });
+        }
+
+        function addImageToPreview(base64) {
+            attachedImages.push(base64);
+            
+            imagePreviewArea.classList.remove('hidden');
+            
+            const card = document.createElement('div');
+            card.className = 'img-preview-card';
+            
+            const img = document.createElement('img');
+            img.src = base64;
+            
+            const removeBtn = document.createElement('div');
+            removeBtn.className = 'img-preview-remove';
+            removeBtn.innerHTML = '&times;';
+            removeBtn.onclick = () => {
+                // Remove from array
+                const index = attachedImages.indexOf(base64);
+                if (index > -1) {
+                    attachedImages.splice(index, 1);
+                }
+                card.remove();
+                if (attachedImages.length === 0) {
+                    imagePreviewArea.classList.add('hidden');
+                }
+            };
+
+            card.appendChild(img);
+            card.appendChild(removeBtn);
+            imagePreviewArea.appendChild(card);
+        }
+
+        function clearImages() {
+            attachedImages = [];
+            imagePreviewArea.innerHTML = '';
+            imagePreviewArea.classList.add('hidden');
+        }
+
+        // --- Input Auto-Resize & Event Listeners ---
+        userInput.addEventListener('input', function () {
+            this.style.height = 'auto';
+            this.style.height = Math.min(this.scrollHeight, 200) + 'px';
+            updateSendBtnState();
+        });
+
+        function updateSendBtnState() {
+            const hasText = userInput.value.trim().length > 0;
+            const hasImages = attachedImages.length > 0;
+            if (hasText || hasImages) {
+                sendBtn.style.opacity = '1';
+                sendBtn.style.cursor = 'pointer';
+                sendBtn.disabled = false;
+            } else {
+                sendBtn.style.opacity = '0.3';
+                sendBtn.style.cursor = 'not-allowed';
+                sendBtn.disabled = true;
+            }
+        }
+
+        // Check button state on image add/remove
+        const observer = new MutationObserver(updateSendBtnState);
+        observer.observe(imagePreviewArea, { childList: true });
+
+        userInput.addEventListener('keydown', function (e) {
+            if (e.key === 'Enter' && !e.shiftKey) {
+                e.preventDefault();
+                send();
+            }
+        });
+
+        // --- Advanced Features: Branching, Regenerate & Editing ---
+
+        function branchChat(index) {
+            if (!confirm('Start a new thread from here? Subsequent messages will be removed.')) return;
+            
+            // Slice history to include messages 0 to index
+            history = history.slice(0, index + 1);
+            
+            // Re-render UI
+            renderChatFromHistory();
+            saveCurrentSession();
+            
+            // Focus input to continue conversation
+            userInput.focus();
+        }
+
+        function regenerateResponse() {
+            // Check if last message is assistant
+            if (history.length === 0) return;
+            const lastMsg = history[history.length - 1];
+            
+            if (lastMsg.role === 'assistant') {
+                // Remove assistant message
+                history.pop();
+                
+                // Get previous user message content (but don't remove it from history, just re-use content)
+                const userMsg = history[history.length - 1];
+                if (!userMsg || userMsg.role !== 'user') return; // Safety check
+                
+                // Re-render to clear the assistant message from UI
+                renderChatFromHistory();
+                
+                // Call send logic, but skip adding user message to history (isRegenerate = true)
+                send(userMsg.content, true);
+            }
+        }
+
+        // Editing Functions
+        function startEdit(index) {
+            if (editingIndex !== -1) {
+                // If already editing another one, cancel it first (re-render)
+                cancelEdit();
+            }
+            editingIndex = index;
+            renderChatFromHistory(); // This will trigger addMsg to render edit form
+        }
+
+        function cancelEdit() {
+            editingIndex = -1;
+            renderChatFromHistory();
+        }
+
+        function saveEdit(index) {
+            const textarea = document.getElementById(`edit-input-${index}`);
+            if (!textarea) return;
+            
+            const newText = textarea.value.trim();
+            if (!newText) {
+                alert("Message cannot be empty");
+                return;
+            }
+
+            // Update content in history
+            const msg = history[index];
+            if (typeof msg.content === 'string') {
+                msg.content = newText;
+            } else if (Array.isArray(msg.content)) {
+                // Multimodal: find text part and update it
+                const textPart = msg.content.find(p => p.type === 'text');
+                if (textPart) {
+                    textPart.text = newText;
+                } else {
+                    // No text part found (only image?), add it
+                    msg.content.push({ type: 'text', text: newText });
+                }
+            }
+
+            // Slice history to discard everything AFTER this message (new branch)
+            history = history.slice(0, index + 1);
+            
+            // Reset edit mode
+            editingIndex = -1;
+            
+            // Re-render to show updated text
+            renderChatFromHistory();
+            
+            // Trigger generation with new context (isRegenerate = true because user msg is already in history)
+            send(null, true);
+        }
+
+        // --- Core Send Logic ---
+
+        sendBtn.addEventListener('click', () => send());
+        stopBtn.addEventListener('click', () => {
+            if (abortController) {
+                abortController.abort();
+                abortController = null;
+            }
+        });
+
+        async function send(overrideContent = null, isRegenerate = false) {
+            let text = userInput.value.trim();
+            // If regenerating, use the content from the previous user message
+            if (isRegenerate && overrideContent) {
+                text = ""; // clear text input logic since we are using override
+            } else if (overrideContent) {
+                 // unused currently but flexible
+            }
+
+            // Normal send validation
+            if (!isRegenerate && !text && attachedImages.length === 0) return;
+
+            const apiKey = apiKeyInput.value;
+            if (!apiKey) {
+                addMsg('assistant', '⚠️ **未配置 API Key**\n\n请在设置中配置 API Key。', true);
+                return;
+            }
+
+            // Save Settings
+            localStorage.setItem('apiKey', apiKey);
+            localStorage.setItem('model', modelInput.value);
+            localStorage.setItem('systemPrompt', systemPromptInput.value);
+
+            let userContent;
+
+            if (isRegenerate) {
+                // If regenerating, we already have the structured content in history
+                userContent = overrideContent;
+                // DO NOT push to history, it's already there
+            } else {
+                // 1. Construct User Message
+                if (attachedImages.length > 0) {
+                    // Multimodal Format
+                    userContent = [];
+                    if (text) {
+                        userContent.push({ type: "text", text: text });
+                    }
+                    attachedImages.forEach(imgBase64 => {
+                        userContent.push({
+                            type: "image_url",
+                            image_url: {
+                                url: imgBase64
+                            }
+                        });
+                    });
+                } else {
+                    // Simple Text Format
+                    userContent = text;
+                }
+
+                // UI Updates
+                userInput.value = '';
+                userInput.style.height = '44px';
+                
+                // Clear Images from UI (but keep data for request)
+                clearImages();
+
+                // Add to UI & History
+                const currentHistoryLength = history.length;
+                // Note: We don't addMsg here immediately if we want smooth rendering, 
+                // but standard logic is to show user msg first.
+                // We'll push to history first for consistency.
+                history.push({ role: "user", content: userContent });
+                
+                // Render the new message
+                addMsg('user', userContent, false, currentHistoryLength); 
+                
+                // Auto Save
+                saveCurrentSession();
+            }
+
+            // Set UI to loading state
+            userInput.disabled = true;
+            sendBtn.classList.add('hidden');
+            stopBtn.classList.remove('hidden');
+            
+            showTyping();
+
+            // Construct Request
+            const requestBody = {
+                model: modelInput.value,
+                messages: [],
+                temperature: parseFloat(temperatureInput.value),
+                max_tokens: parseInt(maxTokensInput.value),
+                stream: true
+            };
+            
+            const systemMsg = systemPromptInput.value.trim();
+            if (systemMsg) requestBody.messages.push({ role: "system", content: systemMsg });
+            requestBody.messages = requestBody.messages.concat(history); // Full history
+
+            abortController = new AbortController();
+
+            try {
+                const res = await fetch(`${BASE_API_URL}/v1/chat/completions`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Authorization': `Bearer ${apiKey}`
+                    },
+                    body: JSON.stringify(requestBody),
+                    signal: abortController.signal
+                });
+
+                if (!res.ok) {
+                    const err = await res.json().catch(() => ({ error: 'Unknown error' }));
+                    throw new Error(err.error || res.statusText);
+                }
+
+                hideTyping();
+                
+                // Add assistant placeholder with current index
+                const assistantMsgIndex = history.length;
+                const textDiv = addMsg('assistant', '', true, assistantMsgIndex);
+                
+                const reader = res.body.getReader();
+                const decoder = new TextDecoder();
+                let fullResponse = '';
+                let lastRender = 0;
+
+                while (true) {
+                    const { done, value } = await reader.read();
+                    if (done) break;
+
+                    const chunk = decoder.decode(value, { stream: true });
+                    const lines = chunk.split('\n');
+                    
+                    for (const line of lines) {
+                        if (line.startsWith('data: ')) {
+                            const data = line.slice(6).trim();
+                            if (data === '[DONE]') continue;
+                            if (!data) continue;
+                            try {
+                                const json = JSON.parse(data);
+                                const delta = json.choices[0].delta.content || '';
+                                fullResponse += delta;
+
+                                // Throttle UI updates
+                                const now = Date.now();
+                                if (now - lastRender >= 100) {
+                                    textDiv.innerHTML = renderMarkdown(fullResponse);
+                                    chatArea.scrollTop = chatArea.scrollHeight;
+                                    lastRender = now;
+                                }
+                            } catch (e) {
+                                // console.error('Stream parse error', e);
+                            }
+                        }
+                    }
+                }
+
+                // Final render
+                if (fullResponse) {
+                    textDiv.innerHTML = renderMarkdown(fullResponse);
+                    history.push({ role: "assistant", content: fullResponse });
+                    saveCurrentSession();
+                    
+                    // IMPORTANT: Re-render the entire chat to ensure the "Regenerate" 
+                    // button and other actions are correctly displayed for the final state.
+                    renderChatFromHistory();
+                }
+
+            } catch (error) {
+                hideTyping();
+                if (error.name === 'AbortError') {
+                    console.log('Stopped by user');
+                } else {
+                    addMsg('assistant', 'Error: ' + error.message);
+                }
+            } finally {
+                userInput.disabled = false;
+                stopBtn.classList.add('hidden');
+                sendBtn.classList.remove('hidden');
+                userInput.focus();
+                abortController = null;
+                updateSendBtnState();
+            }
+        }
+
+        // --- Helpers ---
+
+        function renderMarkdown(text) {
+            if (!text) return '';
+            let html = marked.parse(text);
+            if (window.DOMPurify) html = DOMPurify.sanitize(html);
+            return html;
+        }
+
+        function addMsg(role, content, md = false, index = -1) {
+            const messageDiv = document.createElement('div');
+            messageDiv.className = 'message-row group'; // Group for hover effects
+
+            // CHECK: Are we editing this message?
+            if (index !== -1 && index === editingIndex) {
+                // Render Edit Form
+                let currentText = '';
+                if (typeof content === 'string') {
+                    currentText = content;
+                } else if (Array.isArray(content)) {
+                    // Extract text part for editing
+                    const textPart = content.find(p => p.type === 'text');
+                    if (textPart) currentText = textPart.text;
+                }
+
+                messageDiv.innerHTML = `
+                    <div class="flex justify-end gap-3 w-full">
+                        <div class="flex flex-col items-end w-full max-w-3xl">
+                            <div class="edit-container w-full bg-gray-50 dark:bg-[#111111] p-3 rounded-lg border border-claude">
+                                <textarea id="edit-input-${index}" rows="3">${escapeHtml(currentText)}</textarea>
+                                <div class="edit-actions">
+                                    <button class="btn-sm btn-cancel" onclick="cancelEdit()">Cancel</button>
+                                    <button class="btn-sm btn-save" onclick="saveEdit(${index})">Save & Submit</button>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                `;
+                messages.appendChild(messageDiv);
+                chatArea.scrollTop = chatArea.scrollHeight;
+                
+                // Focus textarea
+                setTimeout(() => {
+                    const ta = document.getElementById(`edit-input-${index}`);
+                    if(ta) {
+                        ta.focus();
+                        ta.setSelectionRange(ta.value.length, ta.value.length);
+                    }
+                }, 10);
+                return;
+            }
+
+            // Normal Render
+            if (role === 'user') {
+                messageDiv.innerHTML = `
+                    <div class="flex justify-end gap-3">
+                        <div class="flex flex-col items-end max-w-2xl">
+                            <div class="bubble-user px-4 py-3 bg-claude text-white relative">
+                                ${renderUserContent(content)}
+                            </div>
+                            <!-- Actions Toolbar (Left aligned for User) -->
+                            <div class="message-actions flex gap-1 mt-1 text-xs transition-opacity justify-end">
+                                <button class="action-btn copy-btn-user flex items-center gap-1" title="Copy message">
+                                    <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-copy"><rect width="14" height="14" x="8" y="8" rx="2" ry="2"/><path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"/></svg> Copy
+                                </button>
+                                ${index >= 0 ? `
+                                <button class="action-btn flex items-center gap-1" onclick="startEdit(${index})" title="Edit message">
+                                    <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-pencil"><path d="M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z"/><path d="m15 5 4 4"/></svg> Edit
+                                </button>
+                                ` : ''}
+                            </div>
+                        </div>
+                    </div>
+                `;
+                
+                // Add copy listener for user message
+                const copyBtnUser = messageDiv.querySelector('.copy-btn-user');
+                if (copyBtnUser) {
+                    copyBtnUser.addEventListener('click', () => {
+                        let textToCopy = '';
+                        if (typeof content === 'string') {
+                            textToCopy = content;
+                        } else if (Array.isArray(content)) {
+                            // Only copy text parts
+                            textToCopy = content
+                                .filter(p => p.type === 'text')
+                                .map(p => p.text)
+                                .join('\n');
+                        }
+                        
+                        navigator.clipboard.writeText(textToCopy).then(() => {
+                            const originalText = copyBtnUser.innerHTML;
+                            copyBtnUser.innerHTML = 'Copied!';
+                            setTimeout(() => copyBtnUser.innerHTML = originalText, 2000);
+                        });
+                    });
+                }
+            } else {
+                // Assistant
+                // Determine if this is the *latest* message to show "Regenerate"
+                const isLatest = (index === history.length - 1) || (index === history.length); // index match or pending
+                
+                messageDiv.innerHTML = `
+                    <div class="flex gap-3">
+                        <div class="w-8 h-8 rounded-full bg-claude flex-shrink-0 flex items-center justify-center">
+                            <svg class="w-5 h-5 text-white" fill="currentColor" viewBox="0 0 24 24">
+                                <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2z" />
+                            </svg>
+                        </div>
+                        <div class="flex-1 min-w-0 max-w-3xl">
+                            <div class="bubble-claude inline-block px-4 py-3 bg-gray-100 dark:bg-[#2A2A2A] text-black dark:text-white message-text break-words w-full">
+                                ${typeof content === 'string' && md ? renderMarkdown(content) : escapeHtml(content)}
+                            </div>
+                            <!-- Actions Toolbar -->
+                            <div class="message-actions flex gap-2 mt-1 text-xs text-gray-500 transition-opacity">
+                                <button class="action-btn copy-btn flex items-center gap-1">
+                                    <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-copy"><rect width="14" height="14" x="8" y="8" rx="2" ry="2"/><path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"/></svg> Copy
+                                </button>
+                                ${index >= 0 ? `
+                                <button class="action-btn flex items-center gap-1" onclick="branchChat(${index})" title="Reply to continue from here">
+                                    <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-corner-up-left"><polyline points="9 14 4 9 9 4"/><path d="M20 20v-7a4 4 0 0 0-4-4H4"/></svg> Reply
+                                </button>
+                                ` : ''}
+                                ${isLatest && index >= 0 ? `
+                                <button class="action-btn flex items-center gap-1 hover:text-claude" onclick="regenerateResponse()" title="Regenerate last response">
+                                    <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-refresh-cw"><path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8"/><path d="M21 3v5h-5"/><path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16"/><path d="M8 16H3v5"/></svg> Retry
+                                </button>
+                                ` : ''}
+                            </div>
+                        </div>
+                    </div>
+                `;
+
+                // Add copy listener
+                const copyBtn = messageDiv.querySelector('.copy-btn');
+                if (copyBtn) {
+                    copyBtn.addEventListener('click', () => {
+                        const textContent = messageDiv.querySelector('.message-text').innerText;
+                        navigator.clipboard.writeText(textContent).then(() => {
+                            const originalText = copyBtn.innerHTML;
+                            copyBtn.innerHTML = 'Copied!';
+                            setTimeout(() => copyBtn.innerHTML = originalText, 2000);
+                        });
+                    });
+                }
+            }
+
+            messages.appendChild(messageDiv);
+            chatArea.scrollTop = chatArea.scrollHeight;
+
+            if (role === 'assistant') return messageDiv.querySelector('.message-text');
+        }
+
+        function renderUserContent(content) {
+            let innerHTML = '';
+            if (typeof content === 'string') {
+                 innerHTML = escapeHtml(content);
+            } else if (Array.isArray(content)) {
+                // Multimodal
+                content.forEach(part => {
+                    if (part.type === 'text') {
+                        innerHTML += `<div class="mb-2 whitespace-pre-wrap">${escapeHtml(part.text)}</div>`;
+                    } else if (part.type === 'image_url') {
+                        innerHTML += `<img src="${part.image_url.url}" class="max-w-xs rounded-lg mb-2 block" />`;
+                    }
+                });
+            }
+            return innerHTML;
+        }
+
+        function renderWelcomeMsg() {
+            messages.innerHTML = `
+                <div class="flex gap-3">
+                    <div class="w-8 h-8 rounded-full bg-claude flex-shrink-0 flex items-center justify-center">
+                        <svg class="w-5 h-5 text-white" fill="currentColor" viewBox="0 0 24 24">
+                            <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2z" />
+                        </svg>
+                    </div>
+                    <div class="flex-1">
+                        <div class="bubble-claude inline-block px-4 py-3 bg-gray-100 dark:bg-[#2A2A2A] text-black dark:text-white">
+                            你好！我是你的本地 AI 助手。
+                            <ul class="list-disc ml-4 mt-2 text-sm text-gray-600 dark:text-gray-400">
+                                <li>支持上传图片/粘贴截图</li>
+                                <li>支持历史记录保存</li>
+                                <li>支持重试生成 (Retry)</li>
+                                <li>支持话题分支 (Reply to thread)</li>
+                                <li>支持编辑消息 (Edit)</li>
+                            </ul>
+                        </div>
+                    </div>
+                </div>
+            `;
+        }
+
+        function showTyping() {
+            const typingDiv = document.createElement('div');
+            typingDiv.id = 'typing';
+            typingDiv.className = 'flex gap-3';
+            typingDiv.innerHTML = `
+                <div class="w-8 h-8 rounded-full bg-claude flex-shrink-0"></div>
+                <div class="bubble-claude px-4 py-3 bg-gray-100 dark:bg-[#2A2A2A]">
+                    <div class="typing-indicator text-gray-500 flex gap-1">
+                        <span class="inline-block w-2 h-2 bg-current rounded-full"></span>
+                        <span class="inline-block w-2 h-2 bg-current rounded-full"></span>
+                        <span class="inline-block w-2 h-2 bg-current rounded-full"></span>
+                    </div>
+                </div>
+            `;
+            messages.appendChild(typingDiv);
+            chatArea.scrollTop = chatArea.scrollHeight;
+        }
+
+        function hideTyping() {
+            const typing = document.getElementById('typing');
+            if (typing) typing.remove();
+        }
+
+        function escapeHtml(text) {
+            if (!text) return '';
+            const div = document.createElement('div');
+            div.textContent = text;
+            return div.innerHTML;
+        }
+
+        // --- Sidebar & Settings Logic (Existing) ---
+        settingsBtn.addEventListener('click', () => {
+            document.body.classList.add('settings-open');
+            settingsPanel.classList.remove('hidden');
+        });
+        closeSettings.addEventListener('click', closeSettingsPanel);
+        cancelSettings.addEventListener('click', closeSettingsPanel);
+        function closeSettingsPanel() {
+            document.body.classList.remove('settings-open');
+            settingsPanel.classList.add('hidden');
+        }
+        confirmSettings.addEventListener('click', () => {
+            localStorage.setItem('apiKey', apiKeyInput.value);
+            localStorage.setItem('model', modelInput.value);
+            localStorage.setItem('systemPrompt', systemPromptInput.value);
+            localStorage.setItem('temperature', temperatureInput.value);
+            localStorage.setItem('max_tokens', maxTokensInput.value);
+            closeSettingsPanel();
+        });
+        
+        function closeSidebar() {
+            sidebar.classList.add('-translate-x-full');
+            mobileOverlay.classList.add('opacity-0');
+            document.body.style.overflow = '';
+            setTimeout(() => mobileOverlay.classList.add('hidden'), 300);
+        }
+        mobileOverlay.addEventListener('click', closeSidebar);
+        
+        let sidebarCollapsed = false;
+        function toggleSidebar() {
+            if (window.innerWidth >= 1024) {
+                sidebarCollapsed = !sidebarCollapsed;
+                if (sidebarCollapsed) {
+                    sidebar.classList.add('-translate-x-full');
+                    sidebar.classList.remove('lg:translate-x-0');
+                    mainContent.classList.remove('lg:ml-64');
+                    sidebarToggleIcon.innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-chevron-right"><path d="m9 18 6-6-6-6"/></svg>';
+                } else {
+                    sidebar.classList.remove('-translate-x-full');
+                    sidebar.classList.add('lg:translate-x-0');
+                    mainContent.classList.add('lg:ml-64');
+                    sidebarToggleIcon.innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-align-justify"><path d="M3 12h18"/><path d="M3 18h18"/><path d="M3 6h18"/></svg>';
+                }
+            } else {
+                if (sidebar.classList.contains('-translate-x-full')) {
+                    sidebar.classList.remove('-translate-x-full');
+                    mobileOverlay.classList.remove('hidden');
+                    setTimeout(() => mobileOverlay.classList.remove('opacity-0'), 10);
+                } else {
+                    closeSidebar();
+                }
+            }
+        }
+        sidebarToggleBtn.addEventListener('click', toggleSidebar);
+
+        refreshModelsBtn.addEventListener('click', async () => {
+            const apiKey = apiKeyInput.value;
+            if (!apiKey) {
+                alert('Please enter API Key in Settings.');
+                return;
+            }
+            const originalHTML = refreshModelsBtn.innerHTML;
+            refreshModelsBtn.disabled = true;
+            refreshModelsBtn.innerHTML = '<svg class="w-5 h-5 animate-spin" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg>';
+            try {
+                const res = await fetch(`${BASE_API_URL}/v1/models`, { headers: { 'Authorization': `Bearer ${apiKey}` } });
+                const data = await res.json();
+                if (data.data && data.data.length > 0) {
+                    modelInput.innerHTML = '';
+                    data.data.forEach(model => {
+                        const option = document.createElement('option');
+                        option.value = model.id;
+                        option.textContent = model.id;
+                        modelInput.appendChild(option);
+                    });
+                    alert(`Loaded ${data.data.length} models.`);
+                }
+            } catch (e) {
+                alert('Error fetching models: ' + e.message);
+            } finally {
+                refreshModelsBtn.disabled = false;
+                refreshModelsBtn.innerHTML = originalHTML;
+            }
+        });
+        
+        // Export logic (same as before)
+        exportBtn.addEventListener('click', () => { exportPanel.classList.remove('hidden'); });
+        cancelExport.addEventListener('click', () => { exportPanel.classList.add('hidden'); });
+        doExport.addEventListener('click', () => {
+             const format = document.querySelector('input[name="export-format"]:checked').value;
+             let content = '';
+             history.forEach(msg => {
+                 let text = typeof msg.content === 'string' ? msg.content : '[Multimodal Message]';
+                 if (Array.isArray(msg.content)) {
+                     text = msg.content.map(p => p.type === 'text' ? p.text : '[Image]').join(' ');
+                 }
+                 content += `## ${msg.role === 'user' ? 'User' : 'Assistant'}\n\n${text}\n\n`;
+             });
+             const timestamp = new Date().toISOString().slice(0, 19).replace(/:/g, '-');
+             download(content, `chat-${timestamp}.${format}`, format === 'md' ? 'text/markdown' : 'text/plain');
+             exportPanel.classList.add('hidden');
+        });
+        function download(text, filename, mime) {
+            const blob = new Blob([text], { type: mime });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = filename;
+            a.click();
+            URL.revokeObjectURL(url);
+        }
+
+    </script>
+</body>
+</html>
